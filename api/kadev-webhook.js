@@ -28,9 +28,11 @@ function getRawBody(req) {
 
 function isValidSignature(rawBody, signatureHeader, secret) {
   if (!signatureHeader || !secret) return false;
-  const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
-  // Tolère un préfixe "sha256=", des espaces et les majuscules
-  const received = String(signatureHeader).trim().replace(/^sha256=/i, "").toLowerCase();
+  // Tolère un préfixe "sha256=" ou "sha512=", des espaces et les majuscules
+  const received = String(signatureHeader).trim().replace(/^(sha256|sha512)=/i, "").toLowerCase();
+  // 128 caractères hexadécimaux = HMAC-SHA512 (cas de Kadev Pay), 64 = HMAC-SHA256
+  const algo = received.length === 128 ? "sha512" : "sha256";
+  const expected = crypto.createHmac(algo, secret).update(rawBody).digest("hex");
   try {
     return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(received));
   } catch (e) {
