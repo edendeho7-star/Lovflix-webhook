@@ -40,6 +40,9 @@ function isValidSignature(rawBody, signatureHeader, secret) {
   }
 }
 
+// Prix payé (en F) -> minutes de crédit. À garder identique à CREDIT_PACKS dans l'app.
+const MINUTES_BY_PRICE = { 5: 5 * 60, 10: 12 * 60, 20: 25 * 60 };
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).send("Method not allowed");
@@ -78,17 +81,46 @@ export default async function handler(req, res) {
     return;
   }
 
-  const metadata = event.metadata || (event.data && event.data.metadata) || {};
-  const deviceId = metadata.device_id;
-  const minutes = Number(metadata.minutes);
+  const data = event.data || {};
+  const metadata = event.metadata || data.metadata || {};
+
+  // Diagnostic : structure de l'événement, sans aucune valeur secrète
+  console.log("Événement Kadev :", {
+    keys: Object.keys(event),
+    dataKeys: Object.keys(data),
+    metadataKeys: Object.keys(metadata),
+  });
+
+  // 1) Métadonnées personnalisées de l'app si Kadev les transmet
+  let deviceId = metadata.device_id;
+  let minutes = Number(metadata.minutes);
+
+  // 2) Sinon repli : le numéro de téléphone (= identifiant du compte) et le montant payé
+  if (!deviceId) {
+    const phoneRaw = metadata.phone_number || event.phone_number || data.phone_number || event.phone || data.phone || "";
+    const digits = String(phoneRaw).replace(/\D/g, "");
+    deviceId = digits.length >= 10 ? digits.slice(-10) : "";
+  }
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    const amount = Number(
+      metadata.paystack_charged_amount != null ? metadata.paystack_charged_amount
+      : event.amount != null ? event.amount
+      : data.amount
+    );
+    minutes = MINUTES_BY_PRICE[amount];
+  }
 
   if (!deviceId || !Number.isFinite(minutes) || minutes <= 0) {
-    console.error("Metadata manquante ou invalide sur le webhook :", metadata);
+    console.error("Impossible de déterminer le compte ou les minutes :", { deviceId, minutes, metadata });
     res.status(400).send("missing or invalid metadata");
     return;
   }
 
-  const reference = event.reference || (event.data && event.data.reference) || null;
+  const reference =
+    event.reference || data.reference ||
+    event.transaction_id || data.transaction_id ||
+    event.id || data.id ||
+    metadata.order_id || null;
 
   try {
     const creditRef = db.collection("credits").doc(deviceId);
