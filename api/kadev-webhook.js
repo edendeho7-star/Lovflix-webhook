@@ -29,8 +29,10 @@ function getRawBody(req) {
 function isValidSignature(rawBody, signatureHeader, secret) {
   if (!signatureHeader || !secret) return false;
   const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+  // Tolère un préfixe "sha256=", des espaces et les majuscules
+  const received = String(signatureHeader).trim().replace(/^sha256=/i, "").toLowerCase();
   try {
-    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signatureHeader));
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(received));
   } catch (e) {
     return false;
   }
@@ -46,7 +48,15 @@ export default async function handler(req, res) {
   const signature = req.headers["x-kadevpay-signature"];
 
   if (!isValidSignature(rawBody, signature, process.env.KADEV_WEBHOOK_SECRET)) {
-    console.error("Signature webhook invalide ou absente");
+    // Diagnostic : aucune valeur secrète n'est affichée
+    console.error("Signature invalide", {
+      headerPresent: !!signature,
+      headerPreview: signature
+        ? String(signature).slice(0, 12) + "… (longueur " + String(signature).length + ")"
+        : null,
+      secretDefined: !!process.env.KADEV_WEBHOOK_SECRET,
+      headersSignature: Object.keys(req.headers).filter((h) => /sig|kadev|hook/i.test(h)),
+    });
     res.status(401).send("Invalid signature");
     return;
   }
