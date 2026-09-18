@@ -1,3 +1,6 @@
+// redeploy avec les variables d'environnement
+
+
 import admin from "firebase-admin";
 import crypto from "crypto";
 
